@@ -4,6 +4,7 @@
 #include <list>
 #include <vector>
 #include <cmath>
+#include <numeric>
 
 using namespace std;
 //using namespace Rcpp;
@@ -53,11 +54,13 @@ class tree {
     void build_tree(int, int);
 
   private:
-    void find_best_split_node(node *, double **);
-    vector<vector<double> > make_big_matrix();
+    double ** make_big_matrix();
+    void find_best_split_node(node *);
+    list<node *>::iterator find_best_split_tree(list<node *>);
+    void make_split(node *, int);
 };
 
-vector<vector<double> > tree::make_big_matrix(){
+double ** tree::make_big_matrix() {
   // initiate big matrix
   int nrow = times.size();
   int ncol = adjustment[0].size() + 2*treatments[0].size() + 1;
@@ -65,15 +68,16 @@ vector<vector<double> > tree::make_big_matrix(){
   // Make matrix to input into coxph. Every call to coxph will change the 
   // last columns to the appropriate information apparently this works in
   // C++11
-  vector<vector<double> > big_mat(nrow,vector<double>(ncol));
+  double ** big_mat = new double * [nrow];
 
-  for(i = 0; i < nrow; i++){
+  for (i = 0; i < nrow; i++) {
+    big_mat[i] = new double [ncol];
     //big_mat[i][0]=times[i];
     //big_mat[i][1]=status[i];
-    for(j = 0; j < adjustment[0].size(); j++){
+    for (j = 0; j < adjustment[0].size(); j++) {
       big_mat[i][j] = adjustment[i][j];
     }
-    for(j = 0; j < treatments[0].size(); j++){
+    for (j = 0; j < treatments[0].size(); j++) {
       big_mat[i][j+adjustment[0].size()] = treatments[i][j];
     }
     //dont need to set the reamaining columns. We will change them later.
@@ -113,14 +117,14 @@ make_big_matrix(vector<vector<double> > adj, vector<vector<double> > tmts, vecto
 // find the best split of a single node. assumes all splitting covariates are
 // binary. We will call this function to split the root. Later calls will be
 // made to the children of a split automatically in the make_split function
-void tree::find_best_split_node(node * nd, double ** big_mat) {
+void tree::find_best_split_node(node * nd) {
   //if no split is viable, cur_max=-1 at end of function call
   double cur_max = -1;
   int cur_max_index = -1;
   int cur_direction = -1;
   double times[nd->rem_obs.size()];
   double status[nd->rem_obs.size()];
-  double * mat[nd->rem_obs.size()];
+  double ** mat = make_big_matrix();
   int pref_size = adjustment.size() + treatments.size();
   set<int>::iterator col, row;
   int i, j;
@@ -128,6 +132,7 @@ void tree::find_best_split_node(node * nd, double ** big_mat) {
   // For each remaining split..
   for (col = nd->rem_splits.begin(); col != nd->rem_splits.end(); col++) {
     // Make matrix to input into coxph
+    /*
     for (row = nd->rem_obs.begin(), i = 0; row != nd->rem_obs.end(); row++, i++) {
       times[i]  = times[*row];
       status[i] = status[*row];
@@ -137,6 +142,7 @@ void tree::find_best_split_node(node * nd, double ** big_mat) {
         mat[i][pref_size + 1 +j] = splits[*row][*col] * treatments[*row][j];
       }
     }
+    */
 
     vector<double> base_info; // = coxph(times,status,mat,pref_size+1);
     //  if base model does notconverge, go to next splitting covariate.
@@ -169,7 +175,7 @@ void tree::find_best_split_node(node * nd, double ** big_mat) {
 
 // find best split in the tree. Simply searches for the splitting statistic of
 // each node    
-list<node *>::iterator find_best_split_tree(list<node *> leaves) {
+list<node *>::iterator tree::find_best_split_tree(list<node *> leaves) {
     list<node *>::iterator it, max_node = leaves.begin();
 
     for (it = leaves.begin(); it != leaves.end(); it++) {
@@ -185,7 +191,7 @@ list<node *>::iterator find_best_split_tree(list<node *> leaves) {
 
 // make the split, update the leaves with the two new children nodes, and find
 // the best split for them
-void make_split(node * leaf, int min_num_events) {
+void tree::make_split(node * leaf, int min_num_events) {
     set<int>::iterator it;
     set<int> r_rem_obs, l_rem_obs, rem_splits = leaf->rem_splits;
     int l_events = 0;
@@ -218,22 +224,23 @@ void make_split(node * leaf, int min_num_events) {
 }   
 
 // actually build the tree.
-void tree::build_tree(int min_num_splits, int min_num_events) {
+void tree::build_tree(int max_num_splits, int min_num_events) {
     // initiate list of leaves
     list<node *> leaves;
-    set<int> splits, obs;
+    list<node *>::iterator node_to_split;
+    set<int> splts, obs;
     int i, num_events;
 
     // initiate root node. Each node will contain the information of the sample
     // before the split as well as information from the split 
-    for (i = 0; i <= splits[0].size(); i++) splits.insert(i);
+    for (i = 0; i <= splits[0].size(); i++) splts.insert(i);
     for (i = 0; i <= status.size();    i++) obs.insert(i);
     // number of events is sum of status vector. Assumes 0=no event, 1=event.
     num_events = accumulate(status.begin(), status.end(), 0);
-    root = new node(1, rem_splits, rem_obs, num_events);
+
+    root = new node(1, splts, obs, num_events);
     // get the first split information.
     find_best_split_node(root);
-
     leaves.push_back(root);
 
     // the best splits have already been found for the new leaves
@@ -244,13 +251,13 @@ void tree::build_tree(int min_num_splits, int min_num_events) {
     // remove the parent node from the list of leaves and add the two children
     // nodes from the leaves
     while (leaves.size() < max_num_splits) {          
-        node_to_split = find_best_split_tree(leaves)
+        node_to_split = find_best_split_tree(leaves);
         // node_to_split will be null if no more splits (each leaf has too few
         // ovservations or models do not fit properly)
         if (node_to_split == leaves.end()) break;
         else {
           // this will update leaves and find the best split for the new leaves
-          make_split(node_to_split);
+          make_split(*node_to_split, min_num_events);
           leaves.erase(node_to_split);
           leaves.push_back((*node_to_split)->left);
           leaves.push_back((*node_to_split)->right);
