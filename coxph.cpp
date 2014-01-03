@@ -1,58 +1,142 @@
-/*
-** Cox regression fit, replacement for coxfit2 in order
-**   to be more frugal about memory: specificly that we 
-**   don't make copies of the input data.
-**
-**  the input parameters are
-**
-**       maxiter      :number of iterations
-**       time(n)      :time of event or censoring for person i
-**       status(n)    :status for the ith person    1=dead , 0=censored
-**       covar(nv,n)  :covariates for person i.
-**                        Note that S sends this in column major order.
-**       strata(n)    :marks the strata.  Will be 1 if this person is the
-**                       last one in a strata.  If there are no strata, the
-**                       vector can be identically zero, since the nth person's
-**                       value is always assumed to be = to 1.
-**       offset(n)    :offset for the linear predictor
-**       weights(n)   :case weights
-**       init         :initial estimate for the coefficients
-**       eps          :tolerance for convergence.  Iteration continues until
-**                       the percent change in loglikelihood is <= eps.
-**       chol_tol     : tolerance for the Cholesky decompostion
-**       method       : 0=Breslow, 1=Efron
-**       doscale      : 0=don't scale the X matrix, 1=scale the X matrix
-**
-**  returned parameters
-**       means(nv)    : vector of column means of X
-**       beta(nv)     :the vector of answers (at start contains initial est)
-**       u(nv)        :score vector
-**       imat(nv,nv)  :the variance matrix at beta=final
-**                      (returned as a vector)
-**       loglik(2)    :loglik at beta=initial values, at beta=final
-**       sctest       :the score test at beta=initial
-**       flag         :success flag  1000  did not converge
-**                                   1 to nvar: rank of the solution
-**       iter         :actual number of iterations used
-**
-**  work arrays
-**       mark(n)
-**       wtave(n)
-**       a(nvar), a2(nvar)
-**       cmat(nvar,nvar)       ragged array
-**       cmat2(nvar,nvar)
-**       newbeta(nvar)         always contains the "next iteration"
-**
-**  calls functions:  cholesky2, chsolve2, chinv2
-**
-**  the data must be sorted by ascending time within strata
-*/
+//#include <Rcpp.h>
+#include <vector>
 #include <math.h>
-//#include "survS.h"
-//#include "survproto.h"
+using namespace std;
+using namespace Rcpp;
 
-double<vector> coxph(double * time, int * status, double ** covar,
-            int nused, int nvar)
+#define LARGE 22
+#define SMALL -200
+
+double coxsafe(double x) {
+    if (x< SMALL) return(SMALL);
+    if (x> LARGE) return(LARGE);
+    return (x);
+    }
+
+double **dmatrix(double *array, int ncol, int nrow)
+    {
+
+    int i;
+    double **pointer;
+
+    pointer = new double * [nrow];
+    for (i=0; i<nrow; i++) {
+  pointer[i] = array;
+	array += ncol;
+	}
+    return(pointer);
+    }
+    
+void chinv2(double **matrix , int n)
+     {
+     register double temp;
+     register int i,j,k;
+
+     /*
+     ** invert the cholesky in the lower triangle
+     **   take full advantage of the cholesky's diagonal of 1's
+     */
+     for (i=0; i<n; i++){
+    if (matrix[i][i] >0) {
+	      matrix[i][i] = 1/matrix[i][i];   /*this line inverts D */
+	      for (j= (i+1); j<n; j++) {
+		   matrix[j][i] = -matrix[j][i];
+		   for (k=0; k<i; k++)     /*sweep operator */
+			matrix[j][k] += matrix[j][i]*matrix[i][k];
+		   }
+	      }
+	  }
+
+     /*
+     ** lower triangle now contains inverse of cholesky
+     ** calculate F'DF (inverse of cholesky decomp process) to get inverse
+     **   of original matrix
+     */
+     for (i=0; i<n; i++) {
+	  if (matrix[i][i]==0) {  /* singular row */
+		for (j=0; j<i; j++) matrix[j][i]=0;
+		for (j=i; j<n; j++) matrix[i][j]=0;
+		}
+	  else {
+	      for (j=(i+1); j<n; j++) {
+		   temp = matrix[j][i]*matrix[j][j];
+		   if (j!=i) matrix[i][j] = temp;
+		   for (k=i; k<j; k++)
+			matrix[i][k] += temp*matrix[j][k];
+		   }
+	      }
+	  }
+     }
+
+int cholesky2(double **matrix, int n, double toler)
+    {
+    double temp;
+    int  i,j,k;
+    double eps, pivot;
+    int rank;
+    int nonneg;
+
+    nonneg=1;
+    eps =0;
+    for (i=0; i<n; i++) {
+  if (matrix[i][i] > eps)  eps = matrix[i][i];
+	for (j=(i+1); j<n; j++)  matrix[j][i] = matrix[i][j];
+	}
+    eps *= toler;
+
+    rank =0;
+    for (i=0; i<n; i++) {
+	pivot = matrix[i][i];
+	if (pivot < eps) {
+	    matrix[i][i] =0;
+	    if (pivot < -8*eps) nonneg= -1;
+	    }
+	else  {
+	    rank++;
+	    for (j=(i+1); j<n; j++) {
+		temp = matrix[j][i]/pivot;
+		matrix[j][i] = temp;
+		matrix[j][j] -= temp*temp*pivot;
+		for (k=(j+1); k<n; k++) matrix[k][j] -= temp*matrix[k][i];
+		}
+	    }
+	}
+    return(rank * nonneg);
+    }
+
+void chsolve2(double **matrix, int n, double *y)
+     {
+     register int i,j;
+     register double temp;
+
+     /*
+     ** solve Fb =y
+     */
+     for (i=0; i<n; i++) {
+    temp = y[i] ;
+	  for (j=0; j<i; j++)
+	       temp -= y[j] * matrix[i][j] ;
+	  y[i] = temp ;
+	  }
+     /*
+     ** solve DF'z =b
+     */
+     for (i=(n-1); i>=0; i--) {
+	  if (matrix[i][i]==0)  y[i] =0;
+	  else {
+	      temp = y[i]/matrix[i][i];
+	      for (j= i+1; j<n; j++)
+		   temp -= y[j]*matrix[j][i];
+	      y[i] = temp;
+	      }
+	  }
+     }
+     
+  
+
+/// [[Rcpp::export]]
+vector<double> coxph(double * time, int * status, double ** covar,
+            int nused, int nvar){
 
     int i,j,k, person;
     
@@ -73,12 +157,12 @@ double<vector> coxph(double * time, int * status, double ** covar,
  
 
     /* vector inputs */
-    double *weights[nused]{0}; //will set to 1 later
-    double *offset[nused]{0}; //stay 0
-    int *strata[nused]{0}; //stay 0
+    double weights[nused]; //will set to 1 later
+    double offset[nused]; //set to 0
+    int strata[nused]; // set to 0
     
     /* returned objects */
-    double *beta[nvar], *u[nvar], *loglik[2], *means[nvar];
+    double beta[nvar], u[nvar], loglik[2], means[nvar];
     double *sctest;
     int *flag, *iter;
 
@@ -92,6 +176,8 @@ double<vector> coxph(double * time, int * status, double ** covar,
     //initialize weights to 1
     for (int i = 0; i < nused; ++i){
         weights[i] = 1;
+        offset[i]=0;
+        strata[i]=0;
     }
         
     
@@ -102,10 +188,11 @@ double<vector> coxph(double * time, int * status, double ** covar,
     **  was called.  In this case NAMED(covar2) will =0
     */
     
-    double * imat2[nvar*nvar];
+    double imat2[nvar*nvar];
     imat = dmatrix(imat2,  nvar, nvar);
     //is this ok?
-    a = (double *) malloc(2*nvar*nvar + 4*nvar, sizeof(double));
+    // (double) 5 makes 5 a double
+    a = new double[2*nvar*nvar + 4*nvar];
     newbeta = a + nvar;
     a2 = newbeta + nvar;
     scale = a2 + nvar;
@@ -118,7 +205,7 @@ double<vector> coxph(double * time, int * status, double ** covar,
     **  much more stable.
     */
     for (i=0; i<nvar; i++) {
-	temp=0;
+  temp=0;
 	for (person=0; person<nused; person++) temp += covar[i][person];
 	temp /= nused;
 	means[i] = temp;
@@ -448,11 +535,12 @@ double<vector> coxph(double * time, int * status, double ** covar,
 finish:
    
     //return flag, loglik, beta. use vector as we will return to c++ land
-    vector<double> result[nvar+2];
+    vector<double> result(nvar+2);
     result[0]=*flag;
-    result[1]=loglik[1]
-    for(int i=2, i<nvar,i++){
+    result[1]=loglik[1];
+    for(int i=2; i<nvar;i++){
         result[i]=beta[i-2];
     }
     return result;
  }
+
