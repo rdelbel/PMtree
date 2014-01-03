@@ -48,8 +48,8 @@
 **  the data must be sorted by ascending time within strata
 */
 #include <math.h>
-#include "survS.h"
-#include "survproto.h"
+//#include "survS.h"
+//#include "survproto.h"
 
 double<vector> coxph(double * time, int * status, double ** covar,
             int nused, int nvar)

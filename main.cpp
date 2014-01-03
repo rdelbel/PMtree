@@ -85,35 +85,6 @@ double ** tree::make_big_matrix() {
   return big_mat;
 }
 
-/*
-// build the bigmatrix. We will use this in find_best_split_node and throw it
-// into the coxph function
-vector<vector<double> > 
-make_big_matrix(vector<vector<double> > adj, vector<vector<double> > tmts, vector<vector<double> > splts) {
-  // initiate big matrix
-  int nrow = times.size();
-  int ncol = adj[0].size() + 2*tmts[0].size() + 1;
-
-  // Make matrix to input into coxph. Every call to coxph will change the 
-  // last columns to the appropriate information apparently this works in
-  // C++11
-  vector<vector<double> > big_mat[nrow][ncol];
-  for(int j=0;i<nrow;i++){
-    big_mat[i][0]=times[i];
-    big_mat[i][1]=status[i];
-    for(int j=0; j<adj[0].size();j++){
-      big_mat[i][j+2]=adj[i,j];
-    }
-    for(int j=0; j<tmts[0].size();j++){
-      big_mat[i][j+2+adj[0].size()]=tmts[i,j];
-    }
-    //dont need to set the reamaining columns. We will change them later.
-  }
-
-  return big_mat;
-}
-*/
-
 // find the best split of a single node. assumes all splitting covariates are
 // binary. We will call this function to split the root. Later calls will be
 // made to the children of a split automatically in the make_split function
@@ -124,7 +95,7 @@ void tree::find_best_split_node(node * nd) {
   int cur_direction = -1;
   double times[nd->rem_obs.size()];
   double status[nd->rem_obs.size()];
-  double ** mat = make_big_matrix();
+  double ** mat;
   int pref_size = adjustment.size() + treatments.size();
   set<int>::iterator col, row;
   int i, j;
@@ -132,17 +103,23 @@ void tree::find_best_split_node(node * nd) {
   // For each remaining split..
   for (col = nd->rem_splits.begin(); col != nd->rem_splits.end(); col++) {
     // Make matrix to input into coxph
-    /*
     for (row = nd->rem_obs.begin(), i = 0; row != nd->rem_obs.end(); row++, i++) {
       times[i]  = times[*row];
       status[i] = status[*row];
-      mat[i] = big_mat[*row];
-      mat[i][pref_size] = splits[*row][*col];
+   //   mat[i] = big_mat[*row];
+      mat[i] = new double[adjustment.size() + treatments.size()*2 + 1];
+      for (j = 0; j < adjustment.size(); j++) {
+        mat[i][j] = adjustment[*row][j];
+      }
       for (j = 0; j < treatments.size(); j++) {
-        mat[i][pref_size + 1 +j] = splits[*row][*col] * treatments[*row][j];
+        mat[i][j + adjustment.size()] = treatments[*row][j];
+      }
+      mat[i][adjustment.size() + treatments.size()] = splits[*row][*col];
+      for (j = 0; j < treatments.size(); j++) {
+        mat[i][adjustment.size() + treatments.size() + 1 + j] 
+          = splits[*row][*col] * treatments[*row][j];
       }
     }
-    */
 
     vector<double> base_info; // = coxph(times,status,mat,pref_size+1);
     //  if base model does notconverge, go to next splitting covariate.
