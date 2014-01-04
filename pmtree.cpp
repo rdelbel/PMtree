@@ -1,7 +1,7 @@
 #include "pmtree.h"
 #include "coxph.cpp"
 #include <iostream>
-
+#include <queue>
 // find the best split of a single node. assumes all splitting covariates are
 // binary. We will call this function to split the root. Later calls will be
 // made to the children of a split automatically in the make_split function
@@ -86,13 +86,16 @@ list<node *>::iterator tree::find_best_split_tree(list<node *> & leaves) {
     // if the max score is -1 then there are no more possible splits
     // otherwise return the node with the best split    
     if ((*max_node)->score == -1) return leaves.end();
-    else return max_node;
+    else{
+        (*max_node)->is_split=1;
+        return  max_node;
+    }
 }
 
 
 // make the split, update the leaves with the two new children nodes, and find
 // the best split for them
-void tree::make_split(node * leaf, int min_num_events) {
+void tree::make_split(node * leaf, int min_num_events, bool max_num_splits) {
     set<int>::iterator it;
     set<int> r_rem_obs, l_rem_obs, rem_splits = leaf->rem_splits;
     int l_events = 0;
@@ -117,11 +120,13 @@ void tree::make_split(node * leaf, int min_num_events) {
     leaf->left  = new node(leaf->node_num * 2, rem_splits, l_rem_obs, l_events);
     leaf->right = new node((leaf->node_num * 2) + 1, rem_splits, r_rem_obs, r_events);
 
-    // we dont want to split the children if they dont have enough events. in 
-    // this case child.score will be -1
+    // we dont want to split the children if they dont have enough events or we
+    // have reached the maximum number of splits in 
+    // this case child.score will be -1i
+    if (!max_num_splits){
     if (l_events >= min_num_events) find_best_split_node(leaf->left);
     if (r_events >= min_num_events) find_best_split_node(leaf->right);
-
+    }
 }   
 
 // actually build the tree.
@@ -144,6 +149,9 @@ void tree::build_tree(int max_num_splits, int min_num_events) {
     find_best_split_node(root);
     leaves.push_back(root);
 
+    //we assume that there is a split.
+   //root->is_split=1;
+
     // the best splits have already been found for the new leaves
     // the two possible conditions to stop building the tree are: after the
     // tree has max_num_splits splits, or when each leaf has too few elements.
@@ -151,14 +159,16 @@ void tree::build_tree(int max_num_splits, int min_num_events) {
     // is accoutned for in find_best_split_tree 
     // remove the parent node from the list of leaves and add the two children
     // nodes from the leaves
-    while (leaves.size() < max_num_splits) {          
+   // int zz=1;
+
+    while (leaves.size() <= max_num_splits) {
         node_to_split = find_best_split_tree(leaves);
         // node_to_split will be null if no more splits (each leaf has too few
         // ovservations or models do not fit properly)
         if (node_to_split == leaves.end()) break;
         else {
           // this will update leaves and find the best split for the new leaves
-          make_split(*node_to_split, min_num_events);
+          make_split(*node_to_split, min_num_events, max_num_splits==leaves.size());
           leaves.push_back((*node_to_split)->left);
           leaves.push_back((*node_to_split)->right);
           node_to_split = leaves.erase(node_to_split);
@@ -168,6 +178,25 @@ void tree::build_tree(int max_num_splits, int min_num_events) {
     num_splits = leaves.size();
 }
 
+//print out the tree
+void tree::print_tree(bool full){
+    queue<node *> Q;
+    node * t;
+    Q.push(root);
+    cout<<"nn "<<"sc "<<"sp "<<"ev "<<"di "<<"is"<<endl<<flush;
+    while(!Q.empty()){
+        t=Q.front();
+        Q.pop();
+        if(!(!full&&t->is_split==0)){
+        cout<<t->node_num<<" "<<t->score<<" "<<t->split<<" "<<
+        t->num_events<<" "<<t->direction<<" "<<t->is_split<<endl<<flush;
+        if(t->left!=NULL)
+        Q.push(t->left);
+        if(t->right!=NULL)
+        Q.push(t->right);
+        }
+    }
+}
 /*
 //todo iterface coxph with our function
 // interface our function with r

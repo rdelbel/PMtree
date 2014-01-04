@@ -8,7 +8,7 @@ all: $(OBJS)
 main.o: main.cpp
 	$(CXX) -c $(FLAGS) main.cpp
 
-pmtree.o: pmtree.cpp
+pmtree.o: pmtree.cpp coxph.cpp
 	$(CXX) -c $(FLAGS) pmtree.cpp
 clean: 
 	rm *.o

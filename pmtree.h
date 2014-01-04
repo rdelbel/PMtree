@@ -11,6 +11,7 @@ using namespace std;
 
 struct node {
   int node_num;
+  int is_split;         // has the node been split? 0=no 1=yes
   double score;        // Node's score
   int split;           // Which feature this node splits
   int num_events; 
@@ -23,7 +24,7 @@ struct node {
   node * right;
 
   node(int i, set<int> sp, set<int> ro, int e) : 
-    node_num(i), score(-1), split(-1), 
+    node_num(i),is_split(0), score(-1), split(-1), 
     num_events(e), direction(-1), rem_splits(sp),
     rem_obs(ro), left(NULL), right(NULL) 
   { }
@@ -52,10 +53,11 @@ class tree {
     ~tree() { delete root; }
 
     void build_tree(int, int);
+    void print_tree(bool);
 
   private:
     void find_best_split_node(node *);
     list<node *>::iterator find_best_split_tree(list<node *> &);
-    void make_split(node *, int);
+    void make_split(node *, int, bool);
 };
 
